@@ -7,11 +7,12 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import aiohttp_client
-from homeassistant.components import zeroconf, ssdp
+from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from urllib.parse import urlparse
 
 
@@ -34,8 +35,16 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
+    host = data[CONF_HOST].strip()
+    for prefix in ("https://", "http://"):
+        if host.lower().startswith(prefix):
+            host = host[len(prefix):]
+            break
+    host = host.rstrip("/")
+    data[CONF_HOST] = host
+
     session = aiohttp_client.async_get_clientsession(hass)
-    async with session.get(f'http://{data["host"]}:{data["port"]}/state/all') as resp:
+    async with session.get(f'http://{host}:{data["port"]}/state/all') as resp:
         if resp.status == 200:
             pass
         else:
@@ -59,7 +68,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         if user_input is None:
             return self.async_show_form(
@@ -86,8 +95,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_zeroconf(
-        self, discovery_info: zeroconf.ZeroconfServiceInfo
-    ) -> FlowResult:
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> ConfigFlowResult:
         """Handle zeroconf discovery."""
         self.zero_conf = discovery_info
         self.server_id = (
@@ -111,7 +120,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeroconf_confirm(
         self, user_input: dict[str, Any] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle a flow initiated by zeroconf."""
         if user_input is not None:
             data = {
@@ -128,7 +137,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_ssdp(self, discovery_info: ssdp.SsdpServiceInfo) -> FlowResult:
+    async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> ConfigFlowResult:
         """Handle a flow initialized by SSDP discovery."""
         self.host = urlparse(discovery_info.ssdp_location).hostname
         self.port = urlparse(discovery_info.ssdp_location).port
@@ -136,7 +145,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(self.server_id)
         self._abort_if_unique_id_configured()
         self.controller_name = discovery_info.upnp.get(
-            ssdp.ATTR_UPNP_FRIENDLY_NAME, self.host
+            "friendlyName", self.host
         )
         self.context.update(
             {
@@ -151,7 +160,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_ssdp_confirm(
         self, user_input: dict[str, Any] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle a flow initiated by zeroconf."""
         if user_input is not None:
             data = {
